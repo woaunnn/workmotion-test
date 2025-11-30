@@ -1,12 +1,8 @@
 import { createRouter, createWebHistory } from 'vue-router'
-
-// Product views
-import ProductList from '@/views/ProductList.vue'
-import ProductForm from '@/views/ProductForm.vue'
-
-// Category views
-import CategoryList from '@/views/CategoryList.vue'
-import CategoryForm from '@/views/CategoryForm.vue'
+import ProductList from '@/views/product/ProductList.vue'
+import ProductForm from '@/views/product/ProductForm.vue'
+import CategoryList from '@/views/category/CategoryList.vue'
+import CategoryForm from '@/views/category/CategoryForm.vue'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),

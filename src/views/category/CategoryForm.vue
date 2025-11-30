@@ -7,7 +7,7 @@
     </v-breadcrumbs>
 
     <div v-if="loading && isEdit" class="d-flex justify-center align-center my-8">
-      <v-progress-circular indeterminate color="primary" size="64">Loading</v-progress-circular>
+      <v-progress-circular indeterminate color="primary" size="64"></v-progress-circular>
     </div>
 
     <v-card v-else class="mx-auto" max-width="800">
@@ -16,7 +16,7 @@
           <v-text-field
             v-model="form.name"
             label="ชื่อหมวดหมู่"
-            :error-messages="errors.name"
+            :error-messages="v$.name.$errors.map((e) => e.$message)"
             required
             prepend-icon="mdi-tag"
             variant="outlined"
@@ -40,24 +40,28 @@
 import { ref, computed, onMounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import axios from "axios";
+import useVuelidate from "@vuelidate/core";
+import { required, helpers } from "@vuelidate/validators";
 
 const route = useRoute();
 const router = useRouter();
 const id = route?.params?.id || null;
-const loading = ref(true);
+const loading = ref(false);
 const isEdit = computed(() => id && id !== "new");
 const form = ref({
   name: "",
 });
-const errors = ref({
-  name: "",
-});
+const rules = {
+  name: {
+    required: helpers.withMessage("กรุณากรอกชื่อหมวดหมู่", required),
+  },
+};
+const v$ = useVuelidate(rules, form);
 const snackbar = ref({
   show: false,
   message: "",
   color: "success",
 });
-
 const breadcrumbItems = [
   {
     title: "รายการหมวดหมู่",
@@ -70,12 +74,20 @@ const breadcrumbItems = [
   },
 ];
 
+const setSnackbar = (show, message, color) => {
+  snackbar.value = {
+    show,
+    message,
+    color,
+  };
+};
+
 const getCategory = async () => {
   try {
     loading.value = true;
     const res = await axios.get(`${import.meta.env.VITE_API_URL}/category/${id}`);
     if (res.data) {
-      form.value = { ...res.data.item };
+      form.value.name = res.data.item.name;
     } else {
       router.push("/categories");
     }
@@ -87,27 +99,15 @@ const getCategory = async () => {
   }
 };
 
-const validateForm = () => {
-  errors.value = {
-    name: "",
-  };
-
-  let isValid = true;
-
-  if (!form.value.name || form.value.name.trim() === "") {
-    errors.value.name = "กรุณากรอกชื่อหมวดหมู่";
-    isValid = false;
-  }
-
-  return isValid;
+const validateForm = async () => {
+  const result = await v$.value.$validate();
+  return result;
 };
 
 const saveCategory = async () => {
   try {
     loading.value = true;
-    const res = await axios.put(`${import.meta.env.VITE_API_URL}/category/${id}`, {
-      name: form.value.name,
-    });
+    const res = await axios.put(`${import.meta.env.VITE_API_URL}/category/${id}`, form.value);
     return res.data.item;
   } catch (error) {
     console.error("Error saving category:", error);
@@ -126,9 +126,7 @@ const saveCategory = async () => {
 const createCategory = async () => {
   try {
     loading.value = true;
-    const res = await axios.post(`${import.meta.env.VITE_API_URL}/category`, {
-      name: form.value.name,
-    });
+    const res = await axios.post(`${import.meta.env.VITE_API_URL}/category`, form.value);
     return res.data.item;
   } catch (error) {
     console.error("Error creating category:", error);
@@ -145,40 +143,31 @@ const createCategory = async () => {
 };
 
 const handleSubmit = async () => {
-  if (!validateForm()) {
+  const isValid = await validateForm();
+  if (!isValid) {
     return;
   }
 
   loading.value = true;
   try {
     if (isEdit.value) {
-      form.value = await saveCategory();
+      const updatedCategory = await saveCategory();
+      form.value.name = updatedCategory.name;
     } else {
       await createCategory();
       router.push("/categories");
     }
-    snackbar.value = {
-      show: true,
-      message: `${isEdit.value ? "แก้ไข" : "เพิ่ม"}หมวดหมู่เรียบร้อยแล้ว`,
-      color: "success",
-    };
+    setSnackbar(true, `${isEdit.value ? "แก้ไข" : "เพิ่ม"}หมวดหมู่เรียบร้อยแล้ว`, "success");
   } catch (error) {
-    console.error("Error saving category:", error);
-
     let errorMessage = `เกิดข้อผิดพลาดในการ${isEdit.value ? "แก้ไข" : "เพิ่ม"}หมวดหมู่`;
+    console.error("Error saving category:", error);
     if (error.message) {
       errorMessage = error.message;
     }
-
-    snackbar.value = {
-      show: true,
-      message: errorMessage,
-      color: "error",
-    };
-
     if (isEdit.value) {
       getCategory();
     }
+    setSnackbar(true, errorMessage, "error");
   } finally {
     loading.value = false;
   }

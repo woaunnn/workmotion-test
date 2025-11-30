@@ -16,7 +16,7 @@
           <v-text-field
             v-model="form.name"
             label="ชื่อสินค้า"
-            :error-messages="errors.name"
+            :error-messages="v$.name.$errors.map((e) => e.$message)"
             required
             prepend-icon="mdi-package-variant"
             variant="outlined"
@@ -26,7 +26,7 @@
           <v-textarea
             v-model="form.description"
             label="คำอธิบาย"
-            :error-messages="errors.description"
+            :error-messages="v$.description.$errors.map((e) => e.$message)"
             required
             prepend-icon="mdi-text"
             variant="outlined"
@@ -37,7 +37,7 @@
           <v-text-field
             v-model="form.price"
             label="ราคา (บาท)"
-            :error-messages="errors.price"
+            :error-messages="v$.price.$errors.map((e) => e.$message)"
             required
             type="number"
             step="0.01"
@@ -53,7 +53,7 @@
             item-title="name"
             item-value="_id"
             label="หมวดหมู่"
-            :error-messages="errors.categoryId"
+            :error-messages="v$.categoryId.$errors.map((e) => e.$message)"
             required
             prepend-icon="mdi-shape"
             variant="outlined"
@@ -78,6 +78,8 @@
 import { ref, computed, onMounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import axios from "axios";
+import useVuelidate from "@vuelidate/core";
+import { required, numeric, minValue, helpers } from "@vuelidate/validators";
 
 const route = useRoute();
 const router = useRouter();
@@ -89,21 +91,31 @@ const loading = ref(true);
 const form = ref({
   name: "",
   description: "",
-  price: "",
+  price: 0,
   categoryId: "",
 });
-const errors = ref({
-  name: "",
-  description: "",
-  price: "",
-  categoryId: "",
-});
+const rules = {
+  name: {
+    required: helpers.withMessage("กรุณากรอกชื่อสินค้า", required),
+  },
+  description: {
+    required: helpers.withMessage("กรุณากรอกคำอธิบาย", required),
+  },
+  price: {
+    required: helpers.withMessage("กรุณากรอกราคา", required),
+    numeric: helpers.withMessage("ราคาต้องเป็นตัวเลข", numeric),
+    minValue: helpers.withMessage("ราคาต้องมากกว่า 0", minValue(0.01)),
+  },
+  categoryId: {
+    required: helpers.withMessage("กรุณาเลือกหมวดหมู่", required),
+  },
+};
+const v$ = useVuelidate(rules, form);
 const snackbar = ref({
   show: false,
   message: "",
   color: "success",
 });
-
 const breadcrumbItems = [
   {
     title: "รายการสินค้า",
@@ -122,11 +134,7 @@ const getCategories = async () => {
     categories.value = categoriesResponse.data.items || [];
   } catch (error) {
     console.error("Error loading categories:", error);
-    snackbar.value = {
-      show: true,
-      message: "เกิดข้อผิดพลาดในการโหลดหมวดหมู่",
-      color: "error",
-    };
+    setSnackbar("เกิดข้อผิดพลาดในการโหลดหมวดหมู่", "error");
   }
 };
 
@@ -134,7 +142,19 @@ const getProduct = async () => {
   try {
     const res = await axios.get(`${import.meta.env.VITE_API_URL}/product/${id}`);
     if (res.data) {
-      form.value = { ...res.data.item };
+      const { name, description, price, categoryId } = res.data.item;
+      const categoryExists = categories.value.some((c) => c._id === categoryId);
+
+      form.value = {
+        name,
+        description,
+        price,
+        categoryId: categoryExists ? categoryId : null,
+      };
+
+      if (!categoryExists && categoryId) {
+        setSnackbar("หมวดหมู่เดิมถูกลบไปแล้ว กรุณาเลือกหมวดหมู่ใหม่", "warning");
+      }
     } else {
       router.push("/products");
     }
@@ -144,37 +164,9 @@ const getProduct = async () => {
   }
 };
 
-const validateForm = () => {
-  errors.value = {
-    name: "",
-    description: "",
-    price: "",
-    categoryId: "",
-  };
-
-  let isValid = true;
-
-  if (!form.value.name || form.value.name.trim() === "") {
-    errors.value.name = "กรุณากรอกชื่อสินค้า";
-    isValid = false;
-  }
-
-  if (!form.value.description || form.value.description.trim() === "") {
-    errors.value.description = "กรุณากรอกคำอธิบาย";
-    isValid = false;
-  }
-
-  if (!form.value.price || form.value.price <= 0) {
-    errors.value.price = "กรุณากรอกราคาที่ถูกต้อง";
-    isValid = false;
-  }
-
-  if (!form.value.categoryId) {
-    errors.value.categoryId = "กรุณาเลือกหมวดหมู่";
-    isValid = false;
-  }
-
-  return isValid;
+const validateForm = async () => {
+  const result = await v$.value.$validate();
+  return result;
 };
 
 const saveProduct = async () => {
@@ -183,6 +175,12 @@ const saveProduct = async () => {
     return res.data.item;
   } catch (error) {
     console.error("Error saving product:", error);
+    if (
+      error.response?.status === 400 &&
+      error.response?.data?.message === "Product already exists"
+    ) {
+      throw new Error("สินค้านี้มีอยู่ในระบบแล้ว กรุณาใช้ชื่ออื่น");
+    }
     throw error;
   } finally {
     loading.value = false;
@@ -195,6 +193,12 @@ const createProduct = async () => {
     return res.data.item;
   } catch (error) {
     console.error("Error creating product:", error);
+    if (
+      error.response?.status === 400 &&
+      error.response?.data?.message === "Product already exists"
+    ) {
+      throw new Error("สินค้านี้มีอยู่ในระบบแล้ว กรุณาใช้ชื่ออื่น");
+    }
     throw error;
   } finally {
     loading.value = false;
@@ -202,7 +206,8 @@ const createProduct = async () => {
 };
 
 const handleSubmit = async () => {
-  if (!validateForm()) {
+  const isValid = await validateForm();
+  if (!isValid) {
     return;
   }
 
@@ -210,30 +215,39 @@ const handleSubmit = async () => {
   try {
     if (isEdit.value) {
       const updatedProduct = await saveProduct();
-      form.value = updatedProduct;
+      form.value = {
+        name: updatedProduct.name,
+        description: updatedProduct.description,
+        price: updatedProduct.price,
+        categoryId: updatedProduct.categoryId,
+      };
     } else {
       await createProduct();
       router.push("/products");
     }
-    snackbar.value = {
-      show: true,
-      message: `${isEdit.value ? "แก้ไข" : "เพิ่ม"}สินค้าเรียบร้อยแล้ว`,
-      color: "success",
-    };
+    setSnackbar(`${isEdit.value ? "แก้ไข" : "เพิ่ม"}สินค้าเรียบร้อยแล้ว`, "success");
   } catch (error) {
+    let errorMessage = `เกิดข้อผิดพลาดในการ${isEdit.value ? "แก้ไข" : "เพิ่ม"}สินค้า`;
     console.error("Error saving product:", error);
-    snackbar.value = {
-      show: true,
-      message: `เกิดข้อผิดพลาดในการ${isEdit.value ? "แก้ไข" : "เพิ่ม"}สินค้า`,
-      color: "error",
-    };
+    if (error.message) {
+      errorMessage = error.message;
+    }
 
     if (isEdit.value) {
       getProduct();
     }
+    setSnackbar(errorMessage, "error");
   } finally {
     loading.value = false;
   }
+};
+
+const setSnackbar = (message, color = "success") => {
+  snackbar.value = {
+    show: true,
+    message,
+    color,
+  };
 };
 
 onMounted(async () => {
